@@ -1,13 +1,13 @@
 {
-    // Options for type-checking 
-    "compilerOptions": {
-        "allowJs": true,
-        "module": "commonjs",
-        "target": "ES2019", // assumes modern browser or Node@12 or greater  
-        "declaration": true,
-        "declarationDir": "./dist",
-        "declarationMap": true,
-        "emitDeclarationOnly": true,
-    },
-    "exclude": ["node_modules", "dist"]
+  // Options for type-checking
+  "compilerOptions": {
+    "allowJs": true,
+    "module": "commonjs",
+    "target": "ES2019", // assumes modern browser or Node@12 or greater
+    "declaration": true,
+    "declarationDir": "./dist",
+    "declarationMap": true,
+    "emitDeclarationOnly": true
+  },
+  "exclude": ["node_modules", "dist", "rollup.config.js", "webpack.config.js"]
 }

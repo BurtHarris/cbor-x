@@ -1,4 +1,11 @@
+// @ts-check
+
+// TODO work throught the @ts-ignore annotations and figure out what's up with each...
+// for example, typescript says it cant find exorts for mult10, Tag, and typedArrays in the line below
+
+// @ts-ignore
 import { Decoder, mult10, Tag, typedArrays, addExtension as decodeAddExtension } from './decode.js'
+
 let textEncoder
 try {
 	textEncoder = new TextEncoder()
@@ -7,27 +14,42 @@ let extensions, extensionClasses
 const hasNodeBuffer = typeof Buffer !== 'undefined'
 const ByteArrayAllocate = hasNodeBuffer ? Buffer.allocUnsafeSlow : Uint8Array
 const ByteArray = hasNodeBuffer ? Buffer : Uint8Array
+// @ts-ignore
 const RECORD_INLINE_ID = 0xdfff // temporary first-come first-serve tag // proposed tag: 0x7265 // 're'
 const MAX_STRUCTURES = 0x100
 const MAX_BUFFER_SIZE = hasNodeBuffer ? 0x100000000 : 0x7fd00000
+// @ts-ignore
 let serializationId = 1
 let target
 let targetView
 let position = 0
 let safeEnd
+/** @type {any} */
 let bundledStrings = null
 const MAX_BUNDLE_SIZE = 0xf000
 const hasNonLatin = /[\u0080-\uFFFF]/
 const RECORD_SYMBOL = Symbol('record-id')
+/**
+ * @typedef {import('./decode.js').DecoderOptions} EncoderOptions
+ * 	@prop {number} maxSharedStructures
+ *  @prop {boolean} sequential
+ */
+
+/** @implements {EncoderOptions} */
 export class Encoder extends Decoder {
+	/**
+	 * @param {EncoderOptions} options 
+	 */
 	constructor(options) {
 		super(options)
 		this.offset = 0
+		// @ts-ignore
 		let typeBuffer
 		let start
 		let sharedStructures
 		let hasSharedUpdate
 		let structures
+		/** @type {Map & {idsToInsert?:any}} */
 		let referenceMap
 		options = options || {}
 		let encodeUtf8 = ByteArray.prototype.utf8Write ? function(string, position, maxBytes) {
@@ -51,6 +73,9 @@ export class Encoder extends Decoder {
 		if (!this.structures)
 			this.structures = []
 		if (this.saveStructures)
+			/**
+			 * @type {(arg0: SharedData, arg1: (existingShared: any) => boolean) => any}
+			 */
 			this.saveShared = this.saveStructures
 		let samplingPackedValues, packedObjectMap, sharedValues = options.sharedValues
 		let sharedPackedObjectMap
@@ -83,6 +108,7 @@ export class Encoder extends Decoder {
 		
 		this.encode = function(value, encodeOptions)	{
 			if (!target) {
+				// @ts-ignore
 				target = new ByteArrayAllocate(8192)
 				targetView = new DataView(target.buffer, 0, 8192)
 				position = 0
@@ -90,6 +116,7 @@ export class Encoder extends Decoder {
 			safeEnd = target.length - 10
 			if (safeEnd - position < 0x800) {
 				// don't start too close to the end, 
+				// @ts-ignore
 				target = new ByteArrayAllocate(target.length)
 				targetView = new DataView(target.buffer, 0, target.length)
 				safeEnd = target.length - 10
@@ -104,12 +131,14 @@ export class Encoder extends Decoder {
 			referenceMap = encoder.structuredClone ? new Map() : null
 			if (encoder.bundleStrings && typeof value !== 'string') {
 				bundledStrings = []
+				// @ts-ignore
 				bundledStrings.size = Infinity // force a new bundle start on first string
 			} else
 				bundledStrings = null
 
 			sharedStructures = encoder.structures
 			if (sharedStructures) {
+				// @ts-ignore
 				if (sharedStructures.uninitialized) {
 					let sharedData = encoder.getShared() || {}
 					encoder.structures = sharedStructures = sharedData.structures || []
@@ -154,6 +183,7 @@ export class Encoder extends Decoder {
 			structures = sharedStructures || []
 			packedObjectMap = sharedPackedObjectMap
 			if (options.pack) {
+				/** @type {any} */
 				let packedValues = new Map()
 				packedValues.values = []
 				packedValues.encoder = encoder
@@ -365,6 +395,7 @@ export class Encoder extends Decoder {
 					}
 					length = strPosition - position - headerSize
 				} else {
+					// @ts-ignore
 					length = encodeUtf8(value, position + headerSize, maxBytes)
 				}
 
@@ -557,6 +588,7 @@ export class Encoder extends Decoder {
 				} else if (value > -(BigInt(1)<<BigInt(64)) && value < 0) {
 					// if we can fit an unsigned int, use that
 					target[position++] = 0x3b
+					// @ts-ignore
 					targetView.setBigUint64(position, -value - BigInt(1))
 				} else {
 					// overflow
@@ -594,9 +626,11 @@ export class Encoder extends Decoder {
 				targetView.setUint32(position, length)
 				position += 4
 			}
+			// @ts-ignore
 			let key
 			if (encoder.keyMap) { 
 				for (let i = 0; i < length; i++) {
+					// @ts-ignore
 					encode(encodeKey(keys[i]))
 					encode(vals[i])
 				}
@@ -730,6 +764,7 @@ export class Encoder extends Decoder {
 					Math.round(Math.max((end - start) * (end > 0x4000000 ? 1.25 : 2), 0x400000) / 0x1000) * 0x1000)
 			} else // faster handling for smaller buffers
 				newSize = ((Math.max((end - start) << 2, target.length - 1) >> 12) + 1) << 12
+			// @ts-ignore
 			let newBuffer = new ByteArrayAllocate(newSize)
 			targetView = new DataView(newBuffer.buffer, 0, newSize)
 			if (target.copy)
@@ -741,6 +776,23 @@ export class Encoder extends Decoder {
 			safeEnd = newBuffer.length - 10
 			return target = newBuffer
 		}
+		this.saveStructures = undefined
+		this._keyMap = undefined
+		this._mapped = undefined
+		this.encodeKeys = undefined
+		this.useSelfDescribedHeader = undefined
+		this.structuredClone = undefined
+		this.bundleStrings = undefined
+		this.getShared = undefined
+		this.pack = undefined
+		this.useFloat32 = undefined
+		this.mapsAsObjects = undefined
+		this.useTag259ForMaps = undefined
+		this.keyMap = undefined
+		this.encodeKey = undefined
+		this.largeBigIntToFloat = undefined
+		this.useRecords = undefined
+		this.variableMapSize = undefined
 	}
 	useBuffer(buffer) {
 		// this means we are finished using our own buffer and we can write over it safely
@@ -767,6 +819,7 @@ export class Encoder extends Decoder {
 			this.structures = sharedData.structures || []
 			this.sharedValues = sharedData.packedValues
 			this.sharedVersion = sharedData.version
+			// @ts-ignore
 			this.structures.nextId = this.structures.length
 		} else {
 			// restore structures
@@ -860,6 +913,7 @@ extensionClasses = [ Date, Set, Error, RegExp, Tag, ArrayBuffer,
 //Object.getPrototypeOf(Uint8Array.prototype).constructor /*TypedArray*/
 extensions = [{ // Date
 	tag: 1,
+	// @ts-ignore
 	encode(date, encode) {
 		let seconds = date.getTime() / 1000
 		if ((this.useTimestamp32 || date.getMilliseconds() === 0) && seconds >= 0 && seconds < 0x100000000) {
@@ -898,6 +952,7 @@ extensions = [{ // Date
 		encode(tag.value)
 	}
 }, { // ArrayBuffer
+	// @ts-ignore
 	encode(arrayBuffer, encode, makeRoom) {
 		writeBuffer(arrayBuffer, makeRoom)
 	}
@@ -908,6 +963,7 @@ extensions = [{ // Date
 				return 64;
 		} // else no tag
 	},
+	// @ts-ignore
 	encode(typedArray, encode, makeRoom) {
 		writeBuffer(typedArray, makeRoom)
 	}
@@ -934,8 +990,10 @@ extensions = [{ // Date
 			encode(valuesArray)
 			writeArrayHeader(0) // prefixes
 			writeArrayHeader(0) // suffixes
+			// @ts-ignore
 			packedObjectMap = Object.create(sharedPackedObjectMap || null)
 			for (let i = 0, l = valuesArray.length; i < l; i++) {
+				// @ts-ignore
 				packedObjectMap[valuesArray[i]] = i
 			}
 		}
