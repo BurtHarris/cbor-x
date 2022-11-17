@@ -1,9 +1,18 @@
+// @ts-check
 let decoder
 try {
 	decoder = new TextDecoder()
 } catch(error) {}
+
+/**
+ * cborx can decode either from NodeJS Buffers or Uint8Array.   
+ * It also uses a jasvascipt expando property to store away a DataView
+ * @typedef {(Uint8Array | Buffer) & { dataView?: DataView }} DecodeSource
+ */
+
+/** @type {DecodeSource} */
 let src
-let srcEnd
+let srcEnd = 0
 let position = 0
 let alreadySet
 const EMPTY_ARRAY = []
@@ -11,6 +20,7 @@ const LEGACY_RECORD_INLINE_ID = 105
 const RECORD_DEFINITIONS_ID = 0xdffe
 const RECORD_INLINE_ID = 0xdfff // temporary first-come first-serve tag // proposed tag: 0x7265 // 're'
 const BUNDLED_STRINGS_ID = 0xdff9
+// @ts-ignore
 const PACKED_TABLE_TAG_ID = 51
 const PACKED_REFERENCE_TAG_ID = 6
 const STOP_CODE = {}
@@ -22,6 +32,9 @@ let srcString
 let srcStringStart = 0
 let srcStringEnd = 0
 let bundledStrings
+/**
+ * @type {Map & {id?: number}}
+ */
 let referenceMap
 let currentExtensions = []
 let currentExtensionRanges = []
@@ -34,8 +47,28 @@ let defaultOptions = {
 }
 let sequentialMode = false
 
+/**
+ * @typedef {Object} DecoderOptions
+ * 
+ */
+
+/**
+ * 
+ */
 export class Decoder {
+	/**
+	 * Options the decoder should use
+	 * @param {DecoderOptions} options 
+	 */
 	constructor(options) {
+		// TODO: refine types on this members
+		this.keyMap = undefined
+		this._keyMap = undefined
+		this.sharedValues = undefined
+		this.pack = undefined
+		this.maxPrivatePackedValues = undefined
+		this.structures = undefined
+
 		if (options) {
 			if ((options.keyMap || options._keyMap) && !options.useRecords) {
 				options.useRecords = false
@@ -46,6 +79,7 @@ export class Decoder {
 			if (options.getStructures)
 				options.getShared = options.getStructures
 			if (options.getShared && !options.structures)
+				// @ts-ignore
 				(options.structures = []).uninitialized = true // this is what we use to denote an uninitialized structures
 			if (options.keyMap) {
 				this.mapKey = new Map()
@@ -88,6 +122,12 @@ export class Decoder {
 		return res
 	}
 	
+	/**
+	 * 
+	 * @param {DecodeSource} source 
+	 * @param {number} end 
+	 * @returns 
+	 */
 	mapDecode(source, end) {
 	
 		let res = this.decode(source)
@@ -101,6 +141,12 @@ export class Decoder {
 		return res
 	}
 
+	/**
+	 * Decode a CBOR item from a buffer
+	 * @param {DecodeSource} source 
+	 * @param {number} [end] 
+	 * @returns {any}
+	 */
 	decode(source, end) {
 		if (src) {
 			// re-entrant execution, save the state and restore it after we do this decode
@@ -127,6 +173,7 @@ export class Decoder {
 			src = null
 			if (source instanceof Uint8Array)
 				throw error
+			// @ts-ignore
 			throw new Error('Source must be a Uint8Array or Buffer but was a ' + ((source && typeof source == 'object') ? source.constructor.name : typeof source))
 		}
 		if (this instanceof Decoder) {
@@ -148,6 +195,12 @@ export class Decoder {
 		}
 		return checkedRead()
 	}
+	/**
+	 * Decode a sequence of CBOR items from a buffer
+	 * @param {DecodeSource} source 
+	 * @param {(value:any) => true | false} [forEach] 
+	 * @returns {any}
+	 */
 	decodeMultiple(source, forEach) {
 		let values, lastPosition = 0
 		try {
@@ -183,17 +236,26 @@ export class Decoder {
 		}
 	}
 }
+
+/**
+ * @internal
+ * returns the current position with in the buffer
+ * @returns {number}
+ */
 export function getPosition() {
 	return position
 }
+
+/**
+ * NEEDS DOC
+ * @returns 
+ */
 export function checkedRead() {
 	try {
 		let result = read()
 		if (bundledStrings) {
 			if (position >= bundledStrings.postBundlePosition) {
-				let error = new Error('Unexpected bundle position');
-				error.incomplete = true;
-				throw error
+				throw IncompleteError('Unexpected bundle position');
 			}
 			// bundled strings to skip past
 			position = bundledStrings.postBundlePosition;
@@ -208,9 +270,7 @@ export function checkedRead() {
 				referenceMap = null
 		} else if (position > srcEnd) {
 			// over read
-			let error = new Error('Unexpected end of CBOR data')
-			error.incomplete = true
-			throw error
+			throw IncompleteError('Unexpected end of CBOR data')
 		} else if (!sequentialMode) {
 			throw new Error('Data read, but end of buffer not reached')
 		}
@@ -225,6 +285,10 @@ export function checkedRead() {
 	}
 }
 
+/**
+ * reads one CBOR item from the current buffer
+ * @returns {any}
+ */
 export function read() {
 	let token = src[position++]
 	let majorType = token >> 5
@@ -414,14 +478,15 @@ export function read() {
 			}
 		default: // negative int
 			if (isNaN(token)) {
-				let error = new Error('Unexpected end of CBOR data')
-				error.incomplete = true
-				throw error
+				throw IncompleteError('Unexpected end of CBOR data')
 			}
 			throw new Error('Unknown CBOR token ' + token)
 	}
 }
 const validName = /^[a-zA-Z_$][a-zA-Z\d_$]*$/
+/**
+ * @param {{ slowReads: number; }} structure
+ */
 function createStructureReader(structure) {
 	function readObject() {
 		// get the array size from the header
@@ -449,19 +514,28 @@ function createStructureReader(structure) {
 		let compiledReader = this.compiledReader // first look to see if we have the fast compiled function
 		while(compiledReader) {
 			// we have a fast compiled object literal reader
+			// @ts-ignore
 			if (compiledReader.propertyCount === length)
+				// @ts-ignore
 				return compiledReader(read) // with the right length, so we use it
+			// @ts-ignore
 			compiledReader = compiledReader.next // see if there is another reader with the right length
 		}
+		// @ts-ignore
 		if (this.slowReads++ >= 3) { // create a fast compiled reader
+			// @ts-ignore
 			let array = this.length == length ? this : this.slice(0, length)
+			// @ts-ignore
 			compiledReader = currentDecoder.keyMap 
 			? new Function('r', 'return {' + array.map(k => currentDecoder.decodeKey(k)).map(k => validName.test(k) ? safeKey(k) + ':r()' : ('[' + JSON.stringify(k) + ']:r()')).join(',') + '}')
 			: new Function('r', 'return {' + array.map(key => validName.test(key) ? safeKey(key) + ':r()' : ('[' + JSON.stringify(key) + ']:r()')).join(',') + '}')
 			if (this.compiledReader)
+				// @ts-ignore
 				compiledReader.next = this.compiledReader // if there is an existing one, we store multiple readers as a linked list because it is usually pretty rare to have multiple readers (of different length) for the same structure
+			// @ts-ignore
 			compiledReader.propertyCount = length
 			this.compiledReader = compiledReader
+			// @ts-ignore
 			return compiledReader(read)
 		}
 		let object = {}
@@ -475,6 +549,10 @@ function createStructureReader(structure) {
 	return readObject
 }
 
+/**
+ * Converts a object property key to one that's "safe"
+ * @param {string} key
+ */
 function safeKey(key) {
 	return key === '__proto__' ? '__proto_' : key
 }
@@ -485,14 +563,21 @@ let readString16 = readStringJS
 let readString32 = readStringJS
 
 export let isNativeAccelerationEnabled = false
+
+/**
+ * @internal
+ * Used to install the nativeAcceleration add-on in node
+ * @param {(arg0: number, arg1: number, arg2: any, arg3: DecodeSource) => any} extractStrings
+ */
 export function setExtractor(extractStrings) {
 	isNativeAccelerationEnabled = true
 	readFixedString = readString(1)
 	readString8 = readString(2)
 	readString16 = readString(3)
 	readString32 = readString(5)
+	// @ts-ignore
 	function readString(headerLength) {
-		return function readString(length) {
+		return function readString(/** @type {number} */ length) {
 			let string = strings[stringPosition++]
 			if (string == null) {
 				if (bundledStrings)
@@ -523,6 +608,11 @@ export function setExtractor(extractStrings) {
 		}
 	}
 }
+/**
+ * Read a string from the current buffer
+ * @param {*} length 
+ * @returns 
+ */
 function readStringJS(length) {
 	let result
 	if (length < 16) {
@@ -577,6 +667,9 @@ function readStringJS(length) {
 	return result
 }
 let fromCharCode = String.fromCharCode
+/**
+ * @param {number} length
+ */
 function longStringInJS(length) {
 	let start = position
 	let bytes = new Array(length)
@@ -590,6 +683,9 @@ function longStringInJS(length) {
     	}
     	return fromCharCode.apply(String, bytes)
 }
+/**
+ * @param {number} length
+ */
 function shortStringInJS(length) {
 	if (length < 4) {
 		if (length < 2) {
@@ -736,6 +832,9 @@ function readBin(length) {
 		Uint8Array.prototype.slice.call(src, position, position += length) :
 		src.subarray(position, position += length)
 }
+/**
+ * @param {number} length
+ */
 function readExt(length) {
 	let type = src[position++]
 	if (currentExtensions[type]) {
@@ -835,18 +934,22 @@ function readKey() {
 }
 
 export class Tag {
+	/**
+	 * @param {any} value
+	 * @param {number} tag
+	 */
 	constructor(value, tag) {
 		this.value = value
 		this.tag = tag
 	}
 }
 
-currentExtensions[0] = (dateString) => {
+currentExtensions[0] = (/** @type {string} */ dateString) => {
 	// string date extension
 	return new Date(dateString)
 }
 
-currentExtensions[1] = (epochSec) => {
+currentExtensions[1] = (/** @type {number} */ epochSec) => {
 	// numeric date extension
 	return new Date(Math.round(epochSec * 1000))
 }
@@ -934,6 +1037,9 @@ currentExtensions[PACKED_REFERENCE_TAG_ID] = (data) => { // packed reference
 		return packedValues[16 + (data >= 0 ? 2 * data : (-2 * data - 1))]
 	throw new Error('No support for non-integer packed references yet')
 }
+
+/* stringRefs is incomplete - issue 7 
+
 currentExtensions[25] = (id) => {
 	return stringRefs[id]
 }
@@ -946,6 +1052,7 @@ currentExtensions[256] = (read) => {
 	}
 }
 currentExtensions[256].handlesRead = true
+*/
 
 currentExtensions[28] = (read) => { 
 	// shareable http://cbor.schmorp.de/value-sharing (for structured clones)
@@ -971,17 +1078,18 @@ currentExtensions[28] = (read) => {
 	refEntry.target = targetProperties // the placeholder wasn't used, replace with the deserialized one
 	return targetProperties // no cycle, can just use the returned read object
 }
+// @ts-ignore
 currentExtensions[28].handlesRead = true
 
-currentExtensions[29] = (id) => {
+currentExtensions[29] = (/** @type {number} */ id) => {
 	// sharedref http://cbor.schmorp.de/value-sharing (for structured clones)
 	let refEntry = referenceMap.get(id)
 	refEntry.used = true
 	return refEntry.target
 }
 
-currentExtensions[258] = (array) => new Set(array); // https://github.com/input-output-hk/cbor-sets-spec/blob/master/CBOR_SETS.md
-(currentExtensions[259] = (read) => {
+currentExtensions[258] = (/** @type {Array} */ array) => new Set(array); // https://github.com/input-output-hk/cbor-sets-spec/blob/master/CBOR_SETS.md
+(currentExtensions[259] = (/** @type {() => any} */ read) => {
 	// https://github.com/shanewholloway/js-cbor-codec/blob/master/docs/CBOR-259-spec
 	// for decoding as a standard Map
 	if (currentDecoder.mapsAsObjects) {
@@ -989,6 +1097,7 @@ currentExtensions[258] = (array) => new Set(array); // https://github.com/input-
 		restoreMapsAsObject = true
 	}
 	return read()
+// @ts-ignore
 }).handlesRead = true
 function combine(a, b) {
 	if (typeof a === 'string')
@@ -1048,6 +1157,7 @@ function registerTypedArray(TypedArray, tag) {
 		if (!littleEndian && bytesPerElement == 1)
 			continue
 		let sizeShift = bytesPerElement == 2 ? 1 : bytesPerElement == 4 ? 2 : 3
+		//  @ts-ignore potential BUG: types number and boolean have no overlap
 		currentExtensions[littleEndian ? tag : (tag - 4)] = (bytesPerElement == 1 || littleEndian == isLittleEndianMachine) ? (buffer) => {
 			if (!TypedArray)
 				throw new Error('Could not find typed array for code ' + tag)
@@ -1079,8 +1189,11 @@ function readBundleExt() {
 	let dataPosition = position
 	position = bundlePosition
 	bundledStrings = [readStringJS(readJustLength()), readStringJS(readJustLength())]
+	// @ts-ignore
 	bundledStrings.position0 = 0
+	// @ts-ignore
 	bundledStrings.position1 = 0
+	// @ts-ignore
 	bundledStrings.postBundlePosition = position
 	position = dataPosition
 	return read()
@@ -1170,6 +1283,9 @@ export const mult10 = new Array(147) // this is a table matching binary exponent
 for (let i = 0; i < 256; i++) {
 	mult10[i] = +('1e' + Math.floor(45.15 - i * 0.30103))
 }
+/**
+ * @type {Decoder}
+ */
 let defaultDecoder = new Decoder({ useRecords: false })
 export const decode = defaultDecoder.decode
 export const decodeMultiple = defaultDecoder.decodeMultiple
@@ -1179,8 +1295,24 @@ export const FLOAT32_OPTIONS = {
 	DECIMAL_ROUND: 3,
 	DECIMAL_FIT: 4
 }
+/**
+ * 
+ * @param {number} float32Number 
+ * @returns 
+ */
 export function roundFloat32(float32Number) {
 	f32Array[0] = float32Number
 	let multiplier = mult10[((u8Array[3] & 0x7f) << 1) | (u8Array[2] >> 7)]
 	return ((multiplier * float32Number + (float32Number > 0 ? 0.5 : -0.5)) >> 0) / multiplier
+}
+
+/**
+ * create an Error object tagged that it might be recovered from 
+ * if more data is added to the buffer 
+ * @param {*} msg 
+ */
+function IncompleteError(msg) {
+	/** @type {Error & {incomplete?: boolean}} */
+	const result = new Error(msg)
+	result.incomplete = true;
 }

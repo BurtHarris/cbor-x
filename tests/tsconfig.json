@@ -1,0 +1,7 @@
+{
+    // typescript config for tests 
+    "compilerOptions": {
+        "allowJs": true,
+        "noEmit": true
+    }
+}
