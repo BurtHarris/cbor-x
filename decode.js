@@ -27,6 +27,8 @@ let currentExtensions = []
 let currentExtensionRanges = []
 let packedValues
 let dataView
+let stringRefs = null		// for stringref tag
+let stringRefsStack = []	//
 let restoreMapsAsObject
 let defaultOptions = {
 	useRecords: false,
@@ -312,24 +314,31 @@ export function read() {
 				throw new Error('Unknown token ' + token)
 		}
 	}
+	let result = null
 	switch (majorType) {
 		case 0: // positive int
 			return token
 		case 1: // negative int
 			return ~token
 		case 2: // buffer
-			return readBin(token)
+			result = readBin(token)
+			if (stringRefs != null) stringRefs.push(result)
+			return result
 		case 3: // string
+			result = null
 			if (srcStringEnd >= position) {
-				return srcString.slice(position - srcStringStart, (position += token) - srcStringStart)
-			}
-			if (srcStringEnd == 0 && srcEnd < 140 && token < 32) {
+				result = srcString.slice(position - srcStringStart, (position += token) - srcStringStart)
+			} 
+			else if (srcStringEnd == 0 && srcEnd < 140 && token < 32) {
 				// for small blocks, avoiding the overhead of the extract call is helpful
-				let string = token < 16 ? shortStringInJS(token) : longStringInJS(token)
-				if (string != null)
-					return string
+				result = token < 16 ? shortStringInJS(token) : longStringInJS(token)
 			}
-			return readFixedString(token)
+			if (result == null) result = readFixedString(token)
+			
+			// save the string if stringRefs compression in use
+			if (stringRefs != null) stringRefs.push(result)
+
+			return result
 		case 4: // array
 			let array = new Array(token)
 		  //if (currentDecoder.keyMap) for (let i = 0; i < token; i++) array[i] = currentDecoder.decodeKey(read())	
@@ -934,15 +943,18 @@ currentExtensions[PACKED_REFERENCE_TAG_ID] = (data) => { // packed reference
 		return packedValues[16 + (data >= 0 ? 2 * data : (-2 * data - 1))]
 	throw new Error('No support for non-integer packed references yet')
 }
-currentExtensions[25] = (id) => {
+currentExtensions[25] = (id) => {  // stringref - see http://cbor.schmorp.de/stringref
+	if (id < 0 || id >= stringRefs.length)
+		throw new Error('Invalid CBOR stringRef tagged value ' + id)
 	return stringRefs[id]
 }
-currentExtensions[256] = (read) => {
+currentExtensions[256] = (read) => { // stringref-namespace - see http://cbor.schmorp.de/stringref
+	stringRefsStack.push(stringRefs)
 	stringRefs = []
 	try {
 		return read()
 	} finally {
-		stringRefs = null
+		stringRefs = stringRefsStack.pop()
 	}
 }
 currentExtensions[256].handlesRead = true
